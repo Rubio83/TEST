@@ -1,0 +1,46 @@
+public class CheckingController : Controller
+{
+    private readonly ICheckingService _service; // 封裝 DB 存取
+
+    // 1. 連動選單：根據 Item 取得 DetailItem
+    [HttpPost]
+    public JsonResult GetDetailItems(string stationId, string title, string item)
+    {
+        // 對應原本 detailItem.jsp 的邏輯
+        var details = _service.GetDetailItemList(stationId, title, item);
+        return Json(details);
+    }
+
+    // 2. 查詢表格資料
+    [HttpPost]
+    public JsonResult QueryObjectiveTable(SubjectiveVM vm)
+    {
+        // 檢查狀態是否為 PROCESSING (對應原本 Rbl_DL_Status 檢查)
+        if (!_service.IsProcessing(vm.Year, vm.Month, vm.Dept_Id))
+        {
+            return Json(new { error = "該月份不允許執行作業" });
+        }
+
+        // 撈取員工清單與已存在的考核紀錄 (對應原本 sSQL & sSQL2)
+        var data = _service.GetPerformanceData(vm);
+        return Json(data);
+    }
+
+    // 3. 存檔邏輯 (包含 amount 計算)
+    [HttpPost]
+    public JsonResult SaveObjectiveData(SubjectiveVM vm, List<PerformanceRow> dataList)
+    {
+        try 
+        {
+            // 取得權重 (tabonus)
+            int taBonus = _service.GetTaBonus(vm.Station_Id, vm.Item, vm.DetailItem);
+            
+            _service.BatchSave(vm, dataList, taBonus, Session["userid"].ToString());
+            return Json(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+}
