@@ -1,0 +1,136 @@
+//BE#202400110, 接收GLT hold 資料for FIN01報表增加Hold day等資訊 add by Rubio on 2024/10/29
+                    //測試時接收檔案大小11.7M,MQ一個MESSAGE =512K,11.7M/512K= 23，超過預設長度20，會導致接收時檔案格式會跑掉
+                    if (sMifNameGET == "SNOVAB102" || sMifNameGET == "H1B122" || sMifNameGET == "EITB101" || sMifNameGET == "EITB107")
+                    {
+                        curdepth =50;
+
+                    }else
+                    {
+                        curdepth =20;//default
+                    }
+
+                    for (int i = 0; i < curdepth; i++)
+                    {
+                        sSql = string.Format(@"select * from fwadmin.TBL_MIFNET_PROPERTY  WHERE upper(JOB_NAME) = '{0}'", sMifNameGET);
+                        DataTable dt0 = _mesdb.GetDataTable(sSql);
+                        if (dt0.Rows.Count > 0)
+                        {
+                            Channel = dt0.Rows[0]["Channel"].ToString();
+                            MQName = dt0.Rows[0]["MQName"].ToString();
+                            Connection = dt0.Rows[0]["Connection"].ToString();
+                            QueueManager = dt0.Rows[0]["QueueManager"].ToString();
+                        }
+                        MQQueueManager _mqManager = new MQQueueManager(QueueManager, Channel, Connection);
+
+                        MQQueue queue = _mqManager.AccessQueue(MQName, MQC.MQOO_INPUT_AS_Q_DEF + MQC.MQOO_FAIL_IF_QUIESCING + MQC.MQGMO_ACCEPT_TRUNCATED_MSG);
+
+                        MQMessage mqMessage = new MQMessage();
+
+                        MQGetMessageOptions option = new MQGetMessageOptions();
+
+                        option.WaitInterval = 10000;
+
+                        queue.Get(mqMessage, option);
+
+                        int msgLen = mqMessage.MessageLength;
+                        byte[] msgText = new byte[msgLen];
+
+                        mqMessage.CharacterSet = 950;
+
+                        msgText = mqMessage.Read(mqMessage.MessageLength);
+ 
+                        mqMessage.ClearMessage();
+
+                        string segment;
+                        if (UTFString == "UTF8")
+                        {
+                            segment =  System.Text.Encoding.UTF8.GetString(msgText, 0, msgLen);
+                           
+                        }
+                        else
+                        {
+                            segment = System.Text.Encoding.GetEncoding("Big5").GetString(msgText, 0, msgLen);
+                        }
+
+                        // 將當前段落累積到 data1
+                        data1 += segment;
+
+                        string[] lines = data1.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+                        int lastEndLineIdx = -1;
+                        for (int idx = lines.Length - 1; idx >= 0; idx--)
+                        {
+                            if (lines[idx].Contains("END"))
+                            {
+                                lastEndLineIdx = idx;
+                                break;
+                            }
+                        }
+
+                        if (lastEndLineIdx == -1)
+                        {
+                            continue;
+                        }
+
+                        string completeData = string.Join(Environment.NewLine, lines.Take(lastEndLineIdx + 1));
+                        data1 = string.Join(Environment.NewLine, lines.Skip(lastEndLineIdx + 1));
+
+                        byte[] bmsgID = mqMessage.MessageId;
+                        string msgID = System.Text.Encoding.UTF8.GetString(bmsgID);
+                        msgID = System.Text.ASCIIEncoding.ASCII.GetString(bmsgID);
+                        byte[] bcorrelationID = mqMessage.CorrelationId;
+                        string correlationID = System.Text.Encoding.UTF8.GetString(bcorrelationID);
+                        correlationID = System.Text.ASCIIEncoding.ASCII.GetString(bcorrelationID);
+
+                        if (sMifNameGET == "EITB115")
+                            localTargetGET = MIFUtil.EpackingFileLocationDirectory;
+                        else
+                            localTargetGET = util.getOutputDirectory();
+
+                        string origianlname = "";
+
+                        origianlname = correlationID.Substring(1, correlationID.Length - 1) + "_" + msgID.Trim();
+                        origianlname = origianlname.Trim();
+                        _logGET.Info("Get Data To:" + origianlname);
+
+                        strFileNameGET = sMifNameGET + "_" + DateTime.Now.ToString("yyyyMMddHHmmssfffff").Substring(4);
+                        sfullFileNameGET = _data.CreateFile(localTargetGET, strFileNameGET);
+                        FileStream fs = new FileStream(sfullFileNameGET, FileMode.Create);
+                        StreamWriter sw = null;
+                        
+                        /// 目前廠內接收的資料都是 Big5 編碼
+                        //string data = "";
+                        
+                        if (UTFString == "UTF8")
+                        {
+                            sw = new StreamWriter(fs, System.Text.Encoding.UTF8);
+                            //data = System.Text.Encoding.UTF8.GetString(msgText, 0, msgLen);
+                            //if (data1 != "")
+                            //{
+                            //    data = data1 + data;
+                            //}
+                        }
+                        else
+                        {
+                            sw = new StreamWriter(fs, System.Text.Encoding.GetEncoding("Big5"));
+                            //data = System.Text.Encoding.GetEncoding("Big5").GetString(msgText, 0, msgLen);
+                            //if (data1 != "")
+                            //{
+                            //    data = data1 + data;
+                            //}
+                        }
+                        
+                        //fs.Write(msgText,0,msgLen);                        
+                        //sw.Write(data);
+                        sw.Write(completeData);
+                        sw.Flush();
+
+                        sw.Close();
+                        fs.Close();
+
+                        data1 = "";
+
+
+鬼^信誠	集英信誠股份有限公司.		TW	END
+2	0000114343		佛昌	佛昌科技有限公司		TW	END
+2	0000114344		伍均	伍均實業有限公司		TW	END
